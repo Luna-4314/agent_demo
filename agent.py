@@ -446,7 +446,7 @@ if __name__ == "__main__":
         data = call_claude_with_retry(transcript, max_attempts=3)
 
         print("\n--- FINAL JSON (validated) ---")
-        print(json.dumps(data, indent=2))
+        #print(json.dumps(data, indent=2))
 
         print("\n--- EXECUTION ---")
         execute_actions(data, transcript)
