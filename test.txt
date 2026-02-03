@@ -1,158 +1,112 @@
 ========================
-Case 1
+[Case 1] 客户单人发言（信息完整 + listings + tour）
 ------------------------
-Hi, this is John Smith. I’m looking to buy a three-bedroom house in Irvine.
-My budget is one point two million dollars, and I’d like to move within the next two months.
-Can we schedule a tour next Tuesday afternoon?
-You can reach me at john.smith@gmail.com or 949-555-1234.
+Transcript:
+Hi, this is Michael Thompson. I’m looking to buy a three-bedroom house in Irvine, preferably near good schools.
+My budget is around one point five million dollars and I’d like to move within the next three months.
+Could you send me some available listings that match this range?
+Also, if possible, I’d love to schedule a house tour sometime next week.
+You can reach me at michael.thompson@gmail.com or 714-333-8899.
 
-Expectation：
-- contact:
-  - name = "John Smith"
-  - email = "john.smith@gmail.com"
-  - phone = "949-555-1234"
-  - need = "Buy a 3-bedroom house in Irvine"（短语即可）
-  - budget = 1200000
-  - timeline = "within the next two months"
-- actions（1–3 个）：
-  1. create_contact, payload = {}
-  2. create_task, payload.task_type = "schedule_tour"
-     - description：安排 John Smith 下周二下午看房（或等价描述）
-     - due：可以是 "next Tuesday afternoon"（string）或 null
-  3. create_call_note, payload = {}
-- call_note:
-  - rawTranscript = 输入原文完整保留
-  - summary = 1–3 句总结（包含地点/预算/时间/看房意图）
+Expectation:
+- contact created (name, email, phone, need, budget=1500000, timeline="within three months")
+- actions:
+  - create_contact
+  - create_task: send_listings
+  - create_task: schedule_tour (or just one task depending on model choice)
+  - create_call_note
 
 
 ========================
- Case 2
+[Case 2] 客户单人发言（有联系方式 + 只要 listings + timeline 模糊）
 ------------------------
-Hi, I’m Emily Chen. I’m interested in condos in Downtown LA.
-Can you send me a few listings to review?
-My email is emily.chen@gmail.com.
+Transcript:
+Hello, my name is Sophia Lee. I’m interested in buying a condo in Downtown San Diego.
+I don’t have a fixed budget yet, but I’m hoping to move sometime later this year.
+Can you send me a few condo listings to get an idea of the market?
+My phone number is 619-888-4521.
 
-Expectation：
-- contact:
-  - name = "Emily Chen"
-  - email = "emily.chen@gmail.com"
-  - phone = null
-  - need = "Condos in Downtown LA"
-  - budget = null
-  - timeline = null
-- actions：
-  1. create_contact, payload = {}
-  2. create_task, task_type = "send_listings"
-     - description：发送 Downtown LA condo listings 给 Emily
-     - due：null 或 "today"
-  3. create_call_note, payload = {}
-- call_note:
-  - summary 应提到：客户要 Downtown LA condo + 请求 listings + 联系方式只有 email
+Expectation:
+- contact created (name, phone, need, timeline)
+- budget = null
+- actions:
+  - create_contact
+  - create_task: send_listings
+  - create_call_note
 
 
 ========================
- Case 3
+[Case 3] 客户单人发言（缺联系方式 → follow up + listings）
 ------------------------
-Transcript（你念）：
-Hey, I’m looking for a two-bedroom apartment in Pasadena.
-I want to move sometime in March. My budget is around three thousand a month.
-I’m driving right now, I’ll send my number later.
+Transcript:
+Hi, I’m looking for a two-bedroom apartment in Pasadena.
+My monthly budget is around three thousand dollars and I’d like to move in by April.
+I’d really appreciate it if you could send me some available listings.
+I don’t have my contact information with me right now, but I can share it later.
 
-Expectation：
-- contact:
-  - name = null（或如果模型抓到“我没说名字”，则 name 仍应为 null）
-  - email = null
-  - phone = null
-  - need = "2-bedroom apartment in Pasadena"
-  - budget = 3000（或如果不确定单位/月租，允许 budget = null；但更好是 number）
-  - timeline = "in March"
-- actions：
-  - 必须有 create_task: task_type = "follow_up"
-    - description：跟进客户，补充联系方式（phone/email）并确认预算/时间线
-    - due：null 或 "soon"
-  - 必须有 create_call_note, payload = {}
-  - create_contact：理想情况下不触发（因为缺 phone/email）
-- call_note:
-  - summary 应明确：缺联系方式，需要 follow up
+Expectation:
+- contact NOT created (email/phone null)
+- actions:
+  - create_task: send_listings (with note to request contact info)
+  - create_task or create_task only follow_up (depending on prompt behavior)
+  - create_call_note
 
 
 ========================
-Case 4
+[Case 4] 地产经纪人单人内部记录（无客户信息）
 ------------------------
-Transcript：
-Internal note: I need to follow up with the open house leads from yesterday.
-Send the updated listing package to the team and schedule a tour slot for next week.
-No customer contact details captured in this note.
+Transcript:
+Internal note: Had multiple inquiries during today’s open house in Tustin.
+Several visitors were interested in four-bedroom homes around the 1.6 to 1.9 million range.
+Need to follow up tomorrow to collect their contact details and send listings.
+Also plan a group tour for next weekend.
 
-Expectation：
-- contact:
-  - 所有字段都可以是 null（或 need/timeline 可为 null/简短）
-- actions：
-  - create_task 至少 1 个（但你系统限制最多 3 个）
-  - 推荐只生成 1 个 follow_up（更稳）：task_type = "follow_up"
-    - description：跟进 open house leads（并补录联系人信息）
-    - due：null 或 "next week"
-  - create_call_note 必须有
-  - create_contact：不应触发
-- call_note:
-  - summary：经纪人内部待办 + 无客户信息
+Expectation:
+- contact all null
+- actions:
+  - create_task: follow_up
+  - possibly create_task: schedule_tour
+  - create_call_note
 
 
 ========================
-Case 5
+[Case 5] 双人对话（信息完整 + 多任务）
 ------------------------
-Transcript：
-Agent: Hi, this is Luna from ABC Realty. How can I help you today?
-Client: Hi, I’m David Park. I’m looking to buy a 4-bedroom home in Tustin.
-Agent: Great. Do you have a budget range and timeline?
-Client: Around 1.8 million. Ideally moving in within three months.
-Agent: Perfect. Would you like to tour properties next week?
-Client: Yes, next Friday morning works. My phone is 310-777-8899 and email is david.park@gmail.com.
-Agent: Awesome, I’ll set that up and send you options.
+Transcript:
+Agent: Hi, this is Luna from ABC Realty. How can I assist you today?
+Client: Hi, I’m Kevin Rodriguez. I’m looking to buy a single-family home in Costa Mesa.
+Agent: Great! What’s your budget and preferred move-in timeline?
+Client: Around 1.3 million, and hopefully within the next two months.
+Agent: Would you like me to send you some listings that match that range?
+Client: Yes, that would be great. And I’d also like to tour a few homes next week if possible.
+Agent: Perfect. Can I get your contact details?
+Client: Sure, my email is kevin.rodriguez@gmail.com and my phone is 949-777-2345.
 
-Expectation：
-- contact:
-  - name = "David Park"
-  - email = "david.park@gmail.com"
-  - phone = "310-777-8899"
-  - need = "Buy a 4-bedroom home in Tustin"
-  - budget = 1800000
-  - timeline = "within three months"
-- actions：
-  (1) create_contact, payload = {}
-  (2) create_task, task_type = "schedule_tour"
-     - description：安排 David Park 下周五上午看房（Tustin 4BR / ~1.8M）
-     - due： "next Friday morning" 或 null
-  (3) create_call_note, payload = {}
-- call_note:
-  - rawTranscript 全量保留
-  - summary 需包含：地点、户型、预算、timeline、看房时间、联系方式
+Expectation:
+- contact created (name, email, phone, need, budget=1300000, timeline="within two months")
+- actions:
+  - create_contact
+  - create_task: send_listings
+  - create_task: schedule_tour
+  - create_call_note
 
 
 ========================
-Case 6
+[Case 6] 错误触发 + repair 测试（预算格式问题）
 ------------------------
-Transcript：
-Client: My name is Xavier. I want a 3B2B in Irvine.
-Budget: $1,200,000 (or 1.2M). Timeline: within 2 months.
-Please send listings. I can't provide my contact information right now, I'll do it later.
+Transcript:
+Client: My name is Wei Zhang. I’m searching for a 3-bedroom home in Irvine.
+My budget is about $1,200,000 or roughly 1.2M.
+I’d like to move within two months and would appreciate receiving some listings.
+I’ll share my contact info later.
 
-Expectation（理想最终通过 validation 的结果）：
-- contact:
-  - name = "Xavier"
-  - email = null
-  - phone = null
-  - need = "3B2B in Irvine"（或 “3-bedroom 2-bath in Irvine”）
-  - budget = 1200000
-  - timeline = "within two months"
-- actions：
-  - 必须有 create_task: task_type = "send_listings"
-    - description：发送 Irvine 3B2B listings，并提示补充联系方式
-  - 推荐再有 follow_up huozhe send_listings 的 description 里包含请求补充联系方式的意思
-  - create_call_note 必须有
-  - create_contact：不应触发（缺 phone/email）
-- Validation/Repair 触发点说明：
-  - 预算如果被模型输出为 string（例如 "1.2M"），validate_output 会报错：
-    "contact.budget must be a number or null..."
-  - repair_with_claude 应将 budget 修正为 1200000（number）
+Expectation:
+- initial output may fail validation due to budget string
+- repair should correct budget to 1200000 or set null
+- contact NOT created (missing phone/email)
+- actions:
+  - create_task: send_listings (possibly plus follow_up)
+  - create_call_note
+
+============================================================
 
