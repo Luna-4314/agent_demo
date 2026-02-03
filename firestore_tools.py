@@ -2,7 +2,7 @@ from google.cloud import firestore
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
-PROJECT_ID = "project-1f6eb2e4-ff89-4067-874"  # 改成你的 project id（如果不同）
+PROJECT_ID = "project-1f6eb2e4-ff89-4067-874"
 
 db = firestore.Client(project=PROJECT_ID)
 

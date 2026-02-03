@@ -8,6 +8,10 @@ from anthropic import Anthropic
 
 from firestore_tools import create_contact, create_task, create_call_note
 
+from mic_record import record_wav
+from stt_gcp import transcribe_wav
+
+
 # =========================
 # Strong-contract SYSTEM PROMPT (facts at top-level, intent in actions)
 # =========================
@@ -410,39 +414,43 @@ def execute_actions(data: Dict[str, Any], transcript: str):
 # Main
 # =========================
 if __name__ == "__main__":
-    print("\n=== CRM Agent CLI ===")
-    print("Paste transcript. Press Enter twice to submit.")
-    print("Type 'quit' on a new line to exit.\n")
+    print("\n=== CRM Agent CLI (text / mic) ===")
 
     while True:
-        transcript = read_multiline_input().strip()
-
-        # allow quitting
-        if transcript.lower() == "quit":
+        mode = input("\nChoose input mode: [1] text  [2] mic  [q] quit : ").strip().lower()
+        if mode in ("q", "quit"):
             print("Bye 👋")
             break
 
-        # skip empty
-        if not transcript:
-            print("⚠️ Empty input. Try again.\n")
+        if mode == "1":
+            transcript = read_multiline_input().strip()
+            if not transcript:
+                print("⚠️ Empty transcript.")
+                continue
+
+        elif mode == "2":
+            secs_str = input("Record how many seconds? (e.g., 10): ").strip()
+            seconds = int(secs_str) if secs_str.isdigit() else 10
+
+            wav_path = record_wav(out_path="recording.wav", seconds=seconds, sample_rate=16000, channels=1)
+            transcript = transcribe_wav(wav_path, language_code="en-US", sample_rate_hz=16000)
+
+            print("\n--- STT TRANSCRIPT ---")
+            print(transcript)
+
+            if not transcript:
+                print("⚠️ STT returned empty transcript.")
+                continue
+
+        else:
+            print("Invalid choice.")
             continue
 
-        try:
-            data = call_claude_with_retry(transcript, max_attempts=3)
+        # 走你原来的三重兜底 + Firestore 写入
+        data = call_claude_with_retry(transcript, max_attempts=3)
 
-            print("\n--- FINAL JSON (validated) ---")
-            print(json.dumps(data, indent=2))
+        print("\n--- FINAL JSON (validated) ---")
+        print(json.dumps(data, indent=2))
 
-            print("\n--- EXECUTION ---")
-            contact_id, task_ids, call_note_id = execute_actions(data, transcript)
-
-            print("\n✅ Saved to Firestore.")
-            print("contact_id:", contact_id)
-            print("task_ids:", task_ids)
-            print("call_note_id:", call_note_id)
-
-        except Exception as e:
-            print("\n❌ ERROR:", str(e))
-
-        print("\n--------------------------------\n")
-
+        print("\n--- EXECUTION ---")
+        execute_actions(data, transcript)
