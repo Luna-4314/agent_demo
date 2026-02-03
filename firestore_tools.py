@@ -9,8 +9,8 @@ db = firestore.Client(project=PROJECT_ID)
 def _now():
     return datetime.now(timezone.utc)
 
+#生成contact doc返回doc ID
 def create_contact(contact: Dict[str, Any]) -> str:
-    """Create a contact doc and return its document ID."""
     payload = {
         "name": contact.get("name"),
         "email": contact.get("email"),
@@ -24,8 +24,8 @@ def create_contact(contact: Dict[str, Any]) -> str:
     doc_ref.set(payload)
     return doc_ref.id
 
+#生成task doc返回doc ID
 def create_task(task_payload: Dict[str, Any], contact_id: Optional[str] = None) -> str:
-    """Create a task doc and return its document ID. contact_id is optional."""
     payload = {
         "type": task_payload.get("task_type"),
         "description": task_payload.get("description"),
@@ -40,6 +40,7 @@ def create_task(task_payload: Dict[str, Any], contact_id: Optional[str] = None) 
     doc_ref.set(payload)
     return doc_ref.id
 
+#生成call note doc返回doc ID
 def create_call_note(call_note: Dict[str, Any], contact_id: Optional[str] = None) -> str:
     """Create a call_note doc and return its document ID. contact_id is optional."""
     payload = {
@@ -53,3 +54,4 @@ def create_call_note(call_note: Dict[str, Any], contact_id: Optional[str] = None
     doc_ref = db.collection("call_notes").document()
     doc_ref.set(payload)
     return doc_ref.id
+

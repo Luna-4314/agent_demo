@@ -12,9 +12,7 @@ from mic_record import record_wav
 from stt_gcp import transcribe_wav
 
 
-# =========================
-# Strong-contract SYSTEM PROMPT (facts at top-level, intent in actions)
-# =========================
+#prompt for claude
 SYSTEM_PROMPT = """
 You are an AI assistant for a real-estate sales team.
 
@@ -93,9 +91,7 @@ JSON SCHEMA (MUST MATCH EXACTLY):
 Now produce the JSON object.
 """
 
-# =========================
-# Repair prompt (third safety layer)
-# =========================
+#防御机制的prompt
 REPAIR_SYSTEM_PROMPT = """
 You are a strict JSON repair assistant.
 
@@ -118,10 +114,7 @@ client = Anthropic()
 ALLOWED_ACTION_TYPES = {"create_contact", "create_task", "create_call_note"}
 ALLOWED_TASK_TYPES = {"follow_up", "schedule_tour", "send_listings"}
 
-
-# =========================
-# IO helpers
-# =========================
+#接受用户的input，因为text里有空行，所以两次enter为结束
 def read_multiline_input() -> str:
     print("\nPaste call transcript (press Enter twice to finish):\n")
     lines: List[str] = []
@@ -137,17 +130,8 @@ def read_multiline_input() -> str:
         lines.append(line)
     return "\n".join(lines)
 
-
-# =========================
-# Robust JSON parsing (second safety layer)
-# =========================
+#parse claude返回的json string，处理markdown形式
 def parse_json_robust(text: str) -> Tuple[Dict[str, Any], str]:
-    """
-    Parse JSON from LLM output:
-    - strips code fences if present
-    - extracts substring from first '{' to last '}'
-    Returns (parsed_json, extracted_json_text).
-    """
     raw = text.strip()
 
     if raw.startswith("```"):
@@ -166,20 +150,19 @@ def parse_json_robust(text: str) -> Tuple[Dict[str, Any], str]:
     parsed = json.loads(raw)
     return parsed, raw
 
-
-# =========================
-# Validation (third safety layer part 1)
-# =========================
+#检查是否数字
 def _is_number(x: Any) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
+#validation机制，详细检查output是否符合system prompt的要求
 def validate_output(data: Dict[str, Any]) -> Tuple[bool, List[str]]:
     errors: List[str] = []
 
+    #output是否是json
     if not isinstance(data, dict):
         return False, ["Output is not a JSON object."]
 
-    # Top-level keys
+    #Top-level的keys是否齐全
     for key in ["contact", "call_note", "actions"]:
         if key not in data:
             errors.append(f"Missing top-level key: '{key}'")
@@ -188,28 +171,32 @@ def validate_output(data: Dict[str, Any]) -> Tuple[bool, List[str]]:
     call_note = data.get("call_note")
     actions = data.get("actions")
 
-    # contact schema
+    #contact schema
+    #是否是json
     if not isinstance(contact, dict):
         errors.append("Top-level 'contact' must be an object.")
     else:
+        #哪怕是null也要包含所有字段
         required_contact_keys = ["name", "email", "phone", "need", "budget", "timeline"]
         for k in required_contact_keys:
             if k not in contact:
                 errors.append(f"contact missing key: '{k}'")
-
+        #budget必须转化为number type或者null
         b = contact.get("budget")
         if b is not None and not _is_number(b):
             errors.append("contact.budget must be a number or null (no $, commas, or abbreviations like '1.2M').")
 
-    # call_note schema
+    #call_note schema
+    #必须是json
     if not isinstance(call_note, dict):
         errors.append("Top-level 'call_note' must be an object.")
     else:
+        #必须有summary和rawTranscript
         required_note_keys = ["summary", "rawTranscript"]
         for k in required_note_keys:
             if k not in call_note:
                 errors.append(f"call_note missing key: '{k}'")
-
+        #两者必须是string形式
         s = call_note.get("summary")
         rt = call_note.get("rawTranscript")
         if s is not None and not isinstance(s, str):
@@ -217,36 +204,39 @@ def validate_output(data: Dict[str, Any]) -> Tuple[bool, List[str]]:
         if rt is not None and not isinstance(rt, str):
             errors.append("call_note.rawTranscript must be string or null.")
 
-    # actions schema
+    #actions schema
+    #actions必须为非空数组
     if not isinstance(actions, list) or len(actions) == 0:
         errors.append("'actions' must be a non-empty array.")
     else:
+        #数量是1-3
         if len(actions) > 3:
             errors.append("actions must contain 1 to 3 items.")
-
+        #对于每个action
         for i, act in enumerate(actions):
+            #必须是json
             if not isinstance(act, dict):
                 errors.append(f"actions[{i}] must be an object.")
                 continue
-
+            
             t = act.get("type")
             payload = act.get("payload")
-
+            # type必须是在规定范围内的
             if t not in ALLOWED_ACTION_TYPES:
                 errors.append(f"actions[{i}].type must be one of {sorted(ALLOWED_ACTION_TYPES)}")
-
+            #每条payload即使{}都不能是None或者非json形式
             if payload is None or not isinstance(payload, dict):
                 errors.append(f"actions[{i}].payload must be an object ({{}} allowed).")
                 continue
-
+            #如果有create contact，那么payload必须为空，因为其信息储存在了top level里
             if t == "create_contact":
                 if payload != {}:
                     errors.append("create_contact.payload MUST be {} (facts must live in top-level contact).")
-
+            #如果有create call note，那么payload必须为空，因为其信息储存在了top level里
             elif t == "create_call_note":
                 if payload != {}:
                     errors.append("create_call_note.payload MUST be {} (facts must live in top-level call_note).")
-
+            #如果有create task，那么payload必须包含task type, description, due，类型也都必须是string
             elif t == "create_task":
                 allowed_keys = {"task_type", "description", "due"}
                 keys = set(payload.keys())
@@ -262,12 +252,10 @@ def validate_output(data: Dict[str, Any]) -> Tuple[bool, List[str]]:
                     if payload["due"] is not None and not isinstance(payload["due"], str):
                         errors.append("create_task.payload.due must be string or null.")
 
+    #返回error list，里面包含所有需要修改的部分
     return (len(errors) == 0), errors
 
-
-# =========================
-# Repair (third safety layer part 2)
-# =========================
+#让claude repair，二次编译
 def repair_with_claude(transcript: str, bad_json_text: str, errors: List[str]) -> Tuple[Dict[str, Any], str]:
     prompt = {
         "transcript": transcript,
@@ -287,7 +275,7 @@ def repair_with_claude(transcript: str, bad_json_text: str, errors: List[str]) -
     resp = client.messages.create(
         model="claude-sonnet-4-5-20250929",
         max_tokens=900,
-        # temperature=0,  # 如果你 SDK 支持，建议打开；不支持就删掉这一行
+        # temperature=0,
         system=REPAIR_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": json.dumps(prompt)}],
     )
@@ -295,32 +283,32 @@ def repair_with_claude(transcript: str, bad_json_text: str, errors: List[str]) -
     parsed, extracted = parse_json_robust(resp.content[0].text)
     return parsed, extracted
 
-
-# =========================
-# Claude call with tri-layer safety
-# =========================
+#第一次call claude
 def call_claude_once(transcript: str) -> Tuple[Dict[str, Any], str]:
     resp = client.messages.create(
         model="claude-sonnet-4-5-20250929",
         max_tokens=900,
-        # temperature=0,  # 如果你 SDK 支持，建议打开；不支持就删掉这一行
+        # temperature=0
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": transcript}],
     )
     parsed, extracted = parse_json_robust(resp.content[0].text)
     return parsed, extracted
 
+#call claude，包括纠错
 def call_claude_with_retry(transcript: str, max_attempts: int = 3) -> Dict[str, Any]:
-    # Attempt 1
+    #初尝试
     data, extracted = call_claude_once(transcript)
+    #validate
     ok, errs = validate_output(data)
+    #如果没问题，直接返回data
     if ok:
         return data
 
+    #若有问题
     last_json_text = extracted
     last_errors = errs
-
-    # Attempts 2..N repair loop
+    #不断repair，最多4次，直到没错
     for attempt in range(2, max_attempts + 1):
         print(f"⚠️ Validation failed (attempt {attempt-1}). Repairing...")
         repaired, repaired_text = repair_with_claude(transcript, last_json_text, last_errors)
@@ -335,10 +323,7 @@ def call_claude_with_retry(transcript: str, max_attempts: int = 3) -> Dict[str, 
 
     raise ValueError("Model output failed validation after retries:\n" + "\n".join(last_errors))
 
-
-# =========================
-# Executor (方案1): optional contact association, but facts stay top-level
-# =========================
+#检查contact是否包含name+email/phone
 def _is_contact_meaningful(contact: Optional[Dict[str, Any]]) -> bool:
     if not isinstance(contact, dict):
         return False
@@ -347,13 +332,8 @@ def _is_contact_meaningful(contact: Optional[Dict[str, Any]]) -> bool:
     phone = contact.get("phone")
     return bool(name) and (bool(email) or bool(phone))
 
+#在firestore里执行所有actions
 def execute_actions(data: Dict[str, Any], transcript: str):
-    """
-    Execute actions:
-    - Create contact if action exists and info is meaningful.
-    - Create tasks and call_notes regardless of whether a contact was created.
-    - Link tasks/notes to contact if contact_id exists; otherwise write unlinked.
-    """
     actions = data.get("actions", [])
     top_contact = data.get("contact", {})
     top_note = data.get("call_note", {})
@@ -374,7 +354,8 @@ def execute_actions(data: Dict[str, Any], transcript: str):
             print("✅ Created contact:", contact_id)
         else:
             print("ℹ️ Skipped contact creation (insufficient contact info).")
-        break  # only one contact creation
+        # only one contact creation
+        break
 
     # Phase 2: tasks + call_note
     task_ids: List[str] = []
@@ -388,15 +369,17 @@ def execute_actions(data: Dict[str, Any], transcript: str):
         payload = action.get("payload") or {}
 
         if t == "create_contact":
-            continue  # already handled
-
+            # already handled
+            continue
+        
         if t == "create_task":
+            #链接contact id
             task_id = create_task(payload, contact_id=contact_id)
             task_ids.append(task_id)
             print("✅ Created task (linked)" if contact_id else "✅ Created task (unlinked)", ":", task_id)
 
         elif t == "create_call_note":
-            # If call_note is null/null and action exists, still allow storing transcript fallback if desired
+            # If call_note is null and action exists, still allow storing transcript fallback if desired
             note_obj = dict(top_note) if isinstance(top_note, dict) else {}
             # Ensure transcript present when action requests note creation
             if note_obj.get("rawTranscript") is None:
@@ -409,30 +392,44 @@ def execute_actions(data: Dict[str, Any], transcript: str):
 
     return contact_id, task_ids, call_note_id
 
+#用户input选择方式
+def normalize_mode(s: str) -> str:
+    s = (s or "").strip().lower()
+    aliases = {
+        "text": {"1", "text", "t"},
+        "mic": {"2", "mic", "m"},
+        "quit": {"q", "quit", "exit"},
+    }
+    for mode, keys in aliases.items():
+        if s in keys:
+            return mode
+    return "invalid"
 
-# =========================
-# Main
-# =========================
+
 if __name__ == "__main__":
-    print("\n=== CRM Agent CLI (text / mic) ===")
+    print("\n=== AI CRM Automation Demo ===")
 
     while True:
-        mode = input("\nChoose input mode: [1] text  [2] mic  [q] quit : ").strip().lower()
-        if mode in ("q", "quit"):
+        raw = input("\nChoose input mode: [1/text] [2/mic] [q/quit] : ")
+        mode = normalize_mode(raw)
+
+        if mode == "quit":
             print("Bye 👋")
             break
 
-        if mode == "1":
+        if mode == "text":
             transcript = read_multiline_input().strip()
             if not transcript:
                 print("⚠️ Empty transcript.")
                 continue
 
-        elif mode == "2":
+        elif mode == "mic":
+            #选择语音时间
             secs_str = input("Record how many seconds? (e.g., 10): ").strip()
             seconds = int(secs_str) if secs_str.isdigit() else 10
-
+            #输入wav
             wav_path = record_wav(out_path="recording.wav", seconds=seconds, sample_rate=16000, channels=1)
+            #转录
             transcript = transcribe_wav(wav_path, language_code="en-US", sample_rate_hz=16000)
 
             print("\n--- STT TRANSCRIPT ---")
@@ -443,10 +440,9 @@ if __name__ == "__main__":
                 continue
 
         else:
-            print("Invalid choice.")
+            print("❌ Invalid choice. Try: 1/text, 2/mic, q/quit.")
             continue
 
-        # 走你原来的三重兜底 + Firestore 写入
         data = call_claude_with_retry(transcript, max_attempts=3)
 
         print("\n--- FINAL JSON (validated) ---")
@@ -454,3 +450,4 @@ if __name__ == "__main__":
 
         print("\n--- EXECUTION ---")
         execute_actions(data, transcript)
+

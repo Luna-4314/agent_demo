@@ -1,4 +1,6 @@
+#本地音频I/O库
 import sounddevice as sd
+#把音频转写为wav形式
 from scipy.io.wavfile import write
 
 def record_wav(
